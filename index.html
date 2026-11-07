@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HYROX Ahmedabad QR Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #101827;
+      color: white;
+      text-align: center;
+      padding: 20px;
+      margin: 0;
+    }
+    .container {
+      max-width: 500px;
+      margin: 20px auto;
+      background: #1d293b;
+      padding: 20px;
+      border-radius: 14px;
+    }
+    h2 { margin-top: 5px; }
+    p { color: #cbd5e1; }
+    button {
+      padding: 14px 22px;
+      margin: 8px;
+      border: 0;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #start { background: #22c55e; color: #06220f; }
+    #stop { background: #ef4444; color: white; }
+    #copy { background: #e2e8f0; color: #111827; }
+    #qr-reader {
+      width: 100%;
+      margin: 18px auto;
+    }
+    #result {
+      background: #0f172a;
+      padding: 14px;
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+      min-height: 24px;
+    }
+    #status { color: #86efac; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>HYROX AHMEDABAD</h2>
+    <p>Volunteer QR Scanner</p>
+
+    <div id="qr-reader"></div>
+
+    <button id="start" onclick="startScanner()">START CAMERA</button>
+    <button id="stop" onclick="stopScanner()">STOP CAMERA</button>
+
+    <p id="status">Camera not started.</p>
+    <p>Last scanned code:</p>
+    <div id="result">Waiting for scan...</div>
+    <button id="copy" onclick="copyResult()">COPY ID</button>
+    <p>If the portal is open in another tab, scanned IDs will be sent back automatically.</p>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const parentOrigin = params.get("parentOrigin") || "";
+    const nonce = params.get("nonce") || "";
+
+    let scanner = null;
+    let running = false;
+    let lastSentText = "";
+    let lastSentTime = 0;
+    let lastResult = "";
+
+    function validParentOrigin() {
+      try {
+        const url = new URL(parentOrigin);
+        const host = url.hostname;
+        return url.origin === parentOrigin &&
+          (host === "script.google.com" ||
+           host.endsWith(".googleusercontent.com"));
+      } catch (e) {
+        return false;
+      }
+    }
+
+    async function startScanner() {
+      if (running) return;
+
+      if (typeof Html5Qrcode === "undefined") {
+        document.getElementById("status").textContent =
+          "Scanner library could not load. Check your internet connection.";
+        return;
+      }
+
+      try {
+        scanner = new Html5Qrcode("qr-reader");
+
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          function(decodedText) {
+            const now = Date.now();
+
+            // Avoid repeatedly sending the same QR code every camera frame.
+            if (decodedText === lastSentText && now - lastSentTime < 2000) {
+              return;
+            }
+
+            lastSentText = decodedText;
+            lastSentTime = now;
+            lastResult = decodedText;
+
+            document.getElementById("result").textContent = decodedText;
+            document.getElementById("status").textContent =
+              "QR scanned. Sending to volunteer portal...";
+
+            if (window.opener && !window.opener.closed &&
+                nonce && validParentOrigin()) {
+              window.opener.postMessage({
+                type: "HYROX_SCAN",
+                volunteerId: decodedText,
+                nonce: nonce
+              }, parentOrigin);
+
+              document.getElementById("status").textContent =
+                "Scan sent to portal. Ready for next volunteer.";
+            } else {
+              document.getElementById("status").textContent =
+                "QR scanned. Portal connection unavailable. Copy the ID if needed.";
+            }
+          },
+          function() {
+            // Normal camera frames without a QR code are ignored.
+          }
+        );
+
+        running = true;
+        document.getElementById("status").textContent =
+          "Camera active. Ready to scan.";
+        document.getElementById("start").disabled = true;
+
+      } catch (error) {
+        document.getElementById("status").textContent =
+          "Unable to start camera: " + error;
+      }
+    }
+
+    async function stopScanner() {
+      if (!scanner || !running) return;
+
+      try {
+        await scanner.stop();
+        scanner.clear();
+      } catch (error) {
+        console.log(error);
+      }
+
+      running = false;
+      document.getElementById("start").disabled = false;
+      document.getElementById("status").textContent = "Camera stopped.";
+    }
+
+    async function copyResult() {
+      if (!lastResult) {
+        document.getElementById("status").textContent = "No scanned ID to copy.";
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(lastResult);
+        document.getElementById("status").textContent = "ID copied.";
+      } catch (error) {
+        document.getElementById("status").textContent =
+          "Copy not available in this browser.";
+      }
+    }
+  </script>
+</body>
+</html>
